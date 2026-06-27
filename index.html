@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pulse Scanner Demo PWA</title>
+<style>
+body{margin:0;font-family:system-ui;background:#111;color:#fff;text-align:center}
+header{padding:16px;background:#b00020}
+video{width:92%;max-width:420px;border-radius:12px;background:#000;margin:10px auto;display:block}
+button{padding:12px 20px;font-size:18px;border:none;border-radius:8px;background:#0a84ff;color:#fff}
+canvas{width:92%;max-width:420px;height:120px;border:1px solid #444;background:#000}
+.card{margin:12px auto;max-width:430px;background:#1d1d1d;padding:12px;border-radius:12px}
+.small{font-size:.9em;color:#bbb}
+</style>
+</head>
+<body>
+<header><h2>❤️ Pulse Scanner Demo</h2></header>
+<div class="card">
+<p>Cover the <b>rear camera</b> completely with your fingertip.</p>
+<video id="v" autoplay playsinline></video>
+<button id="start">Start Camera</button>
+<h1 id="bpm">-- BPM</h1>
+<div>Signal: <span id="sig">Waiting…</span></div>
+<div>Quality: <span id="q">Unknown</span></div>
+<canvas id="g" width="400" height="120"></canvas>
+<p class="small">Demo only. This is <b>not</b> a medical device.</p>
+</div>
+<script>
+const v=document.getElementById('v');
+const c=document.getElementById('g');
+const ctx=c.getContext('2d');
+const vals=[];
+async function cam(){
+ try{
+  const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});
+  v.srcObject=s;
+  requestAnimationFrame(loop);
+ }catch(e){alert(e);}
+}
+document.getElementById("start").onclick=cam;
+const off=document.createElement("canvas");
+off.width=32;off.height=32;
+const ox=off.getContext("2d");
+let lastPeak=0;
+function loop(){
+ if(v.readyState>=2){
+   ox.drawImage(v,0,0,32,32);
+   const d=ox.getImageData(0,0,32,32).data;
+   let r=0,g=0,b=0;
+   for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2];}
+   r/=1024;g/=1024;b/=1024;
+   vals.push(r);
+   if(vals.length>200)vals.shift();
+   document.getElementById("sig").textContent=r.toFixed(1);
+   let quality=(r>120&&g<90)?"Good finger detected":"Poor";
+   document.getElementById("q").textContent=quality;
+   ctx.clearRect(0,0,c.width,c.height);
+   ctx.beginPath();
+   vals.forEach((v,i)=>{
+      let y=120-(v/255*120);
+      if(i==0)ctx.moveTo(i*2,y); else ctx.lineTo(i*2,y);
+   });
+   ctx.strokeStyle="lime";ctx.stroke();
+
+   // Simple demonstration pulse estimate (NOT medically reliable)
+   if(vals.length>20){
+      let a=vals[vals.length-2],b2=vals[vals.length-1];
+      let avg=vals.reduce((x,y)=>x+y,0)/vals.length;
+      if(a<avg && b2>=avg){
+        const now=performance.now();
+        if(lastPeak){
+          const bpm=Math.round(60000/(now-lastPeak));
+          if(bpm>40&&bpm<180)document.getElementById("bpm").textContent=bpm+" BPM";
+        }
+        lastPeak=now;
+      }
+   }
+ }
+ requestAnimationFrame(loop);
+}
+if('serviceWorker' in navigator){
+ const code='self.addEventListener("fetch",e=>{})';
+ const blob=new Blob([code],{type:'text/javascript'});
+ navigator.serviceWorker.register(URL.createObjectURL(blob));
+}
+</script>
+</body>
+</html>
