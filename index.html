@@ -1,89 +1,685 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pulse Scanner Demo PWA</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+<title>Spandana · Camera Pulse Monitor</title>
+<meta name="theme-color" content="#0a0a0c" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Spandana" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
-body{margin:0;font-family:system-ui;background:#111;color:#fff;text-align:center}
-header{padding:16px;background:#b00020}
-video{width:92%;max-width:420px;border-radius:12px;background:#000;margin:10px auto;display:block}
-button{padding:12px 20px;font-size:18px;border:none;border-radius:8px;background:#0a84ff;color:#fff}
-canvas{width:92%;max-width:420px;height:120px;border:1px solid #444;background:#000}
-.card{margin:12px auto;max-width:430px;background:#1d1d1d;padding:12px;border-radius:12px}
-.small{font-size:.9em;color:#bbb}
+  :root{
+    --bg:#0a0a0c; --bg-elev:#131319; --bg-elev2:#1b1b22;
+    --gold:#d4af6a; --gold-bright:#e8c987; --gold-dim:rgba(212,175,106,.16);
+    --text:#ece8e0; --muted:#8c877e; --faint:#5a564f;
+    --line:rgba(212,175,106,.14); --line-soft:rgba(255,255,255,.06);
+    --good:#7fc8a0; --warn:#e0b15a; --bad:#d98a72;
+    --pulse:#e8c987;
+    --r:18px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:'DM Sans',system-ui,sans-serif;
+    line-height:1.5;-webkit-font-smoothing:antialiased;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+    overscroll-behavior:none;
+  }
+  .wrap{max-width:520px;margin:0 auto;padding:0 18px 120px}
+  h1,h2,h3{font-family:'Cinzel',serif;font-weight:600;letter-spacing:.02em;margin:0}
+  .mono{font-family:'DM Mono',monospace}
+
+  /* Header */
+  header{padding:26px 0 14px;text-align:center}
+  .brandrow{display:flex;align-items:center;justify-content:center;gap:11px}
+  .logo{width:34px;height:34px}
+  header h1{font-size:30px;color:var(--gold-bright);letter-spacing:.06em}
+  .tag{margin-top:5px;color:var(--muted);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase}
+  .deva{font-size:13px;color:var(--gold);letter-spacing:.2em;margin-top:3px}
+
+  /* Honesty banner */
+  .notice{
+    margin:14px 0 6px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(224,177,90,.07),rgba(224,177,90,.02));
+    border-radius:14px;padding:11px 14px;display:flex;gap:10px;align-items:flex-start;
+  }
+  .notice .dot{flex:0 0 auto;margin-top:3px;width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 10px var(--warn)}
+  .notice p{margin:0;font-size:12.5px;color:#cfc8ba}
+  .notice b{color:var(--gold-bright);font-weight:600}
+
+  /* Tabs */
+  .tabs{position:fixed;left:0;right:0;bottom:0;z-index:40;
+    background:rgba(12,12,15,.86);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    border-top:1px solid var(--line);
+    display:flex;justify-content:space-around;
+    padding:8px 6px calc(8px + env(safe-area-inset-bottom));max-width:520px;margin:0 auto}
+  .tab{flex:1;background:none;border:0;color:var(--faint);font-family:'DM Sans';font-size:10.5px;
+    letter-spacing:.08em;text-transform:uppercase;font-weight:600;padding:7px 2px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:4px;transition:color .2s}
+  .tab svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.6}
+  .tab.on{color:var(--gold-bright)}
+  .panel{display:none;animation:fade .35s ease}
+  .panel.on{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  /* Cards */
+  .card{background:var(--bg-elev);border:1px solid var(--line-soft);border-radius:var(--r);padding:18px;margin:14px 0}
+  .card h3{font-size:15px;color:var(--gold);letter-spacing:.05em;margin-bottom:4px}
+  .sub{color:var(--muted);font-size:12.5px}
+
+  /* Pulse stage */
+  .stage{position:relative;display:flex;flex-direction:column;align-items:center;padding:6px 0 2px}
+  .orbwrap{position:relative;width:188px;height:188px;display:flex;align-items:center;justify-content:center;margin:6px 0 2px}
+  .orb-ring{position:absolute;inset:0;border-radius:50%;border:1px solid var(--line)}
+  .orb-ring.r2{inset:18px;opacity:.6}
+  .orb{
+    width:118px;height:118px;border-radius:50%;
+    background:radial-gradient(circle at 50% 40%,rgba(232,201,135,.22),rgba(212,175,106,.05) 60%,transparent 72%);
+    border:1px solid var(--gold-dim);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    transition:transform .09s ease-out, box-shadow .25s ease;
+    box-shadow:0 0 0 rgba(232,201,135,0);
+  }
+  .orb.beat{transform:scale(1.085);box-shadow:0 0 38px rgba(232,201,135,.42)}
+  .bpm{font-family:'DM Mono';font-size:46px;font-weight:500;line-height:1;color:var(--gold-bright);letter-spacing:-.01em}
+  .bpm.placeholder{color:var(--faint);font-size:30px}
+  .bpmlabel{font-size:10px;letter-spacing:.22em;color:var(--muted);text-transform:uppercase;margin-top:6px}
+
+  /* Waveform */
+  .wavebox{width:100%;margin-top:10px;border:1px solid var(--line-soft);border-radius:12px;overflow:hidden;background:#0c0c10}
+  canvas.wave{display:block;width:100%;height:96px}
+
+  /* Stats row */
+  .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-top:12px;width:100%}
+  .stat{background:var(--bg-elev2);border:1px solid var(--line-soft);border-radius:12px;padding:11px 8px;text-align:center}
+  .stat .v{font-family:'DM Mono';font-size:19px;color:var(--text)}
+  .stat .v.dim{color:var(--faint)}
+  .stat .k{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:3px}
+
+  /* Quality bar */
+  .qwrap{width:100%;margin-top:12px}
+  .qhead{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--muted);margin-bottom:6px}
+  .qbar{height:7px;border-radius:6px;background:var(--bg-elev2);overflow:hidden}
+  .qfill{height:100%;width:0%;background:linear-gradient(90deg,var(--bad),var(--warn),var(--good));transition:width .4s ease}
+
+  /* Status line */
+  .status{margin-top:12px;width:100%;text-align:center;font-size:13px;color:var(--muted);min-height:20px}
+  .status b{color:var(--gold-bright)}
+  .status.warnstate{color:var(--warn)}
+
+  /* Buttons */
+  .btn{appearance:none;border:1px solid var(--gold-dim);background:linear-gradient(180deg,rgba(212,175,106,.16),rgba(212,175,106,.05));
+    color:var(--gold-bright);font-family:'DM Sans';font-weight:600;font-size:15px;letter-spacing:.02em;
+    padding:15px 20px;border-radius:14px;width:100%;cursor:pointer;transition:transform .1s, background .2s;margin-top:14px}
+  .btn:active{transform:scale(.985)}
+  .btn.stop{color:var(--bad);border-color:rgba(217,138,114,.3);background:rgba(217,138,114,.08)}
+  .btn.ghost{background:none;color:var(--muted);border-color:var(--line-soft);font-size:13.5px;padding:12px}
+  .btn[disabled]{opacity:.45;pointer-events:none}
+  .countdown{font-family:'DM Mono';color:var(--gold);font-size:13px;margin-left:6px}
+
+  /* History */
+  .hrow{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid var(--line-soft)}
+  .hrow:last-child{border-bottom:0}
+  .hrow .hb{font-family:'DM Mono';font-size:22px;color:var(--gold-bright)}
+  .hrow .hu{font-size:10px;color:var(--muted);letter-spacing:.1em}
+  .hrow .hmeta{text-align:right;font-size:12px;color:var(--muted)}
+  .hrow .hmeta .hv{font-family:'DM Mono';color:var(--text);font-size:13px}
+  .empty{text-align:center;color:var(--faint);padding:30px 10px;font-size:13.5px}
+  .trendbox{border:1px solid var(--line-soft);border-radius:12px;background:#0c0c10;overflow:hidden;margin-top:6px}
+  canvas.trend{display:block;width:100%;height:130px}
+  .row2{display:flex;gap:10px}
+  .row2 .btn{margin-top:12px}
+
+  /* AI */
+  .keyfield{display:flex;gap:8px;margin-top:10px}
+  .keyfield input{flex:1;background:var(--bg-elev2);border:1px solid var(--line-soft);border-radius:11px;
+    color:var(--text);font-family:'DM Mono';font-size:13px;padding:12px 13px;min-width:0}
+  .keyfield input:focus{outline:none;border-color:var(--gold-dim)}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);
+    background:var(--bg-elev2);border:1px solid var(--line-soft);border-radius:20px;padding:5px 11px;margin-top:10px}
+  .pill .g{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+  .pill.live .g{background:var(--good);box-shadow:0 0 8px var(--good)}
+  .aiout{margin-top:14px;background:var(--bg-elev2);border:1px solid var(--line-soft);border-radius:13px;padding:15px;font-size:14px;color:#dcd6c9;white-space:pre-wrap;line-height:1.6}
+  .aiout .disc{display:block;margin-top:12px;padding-top:11px;border-top:1px solid var(--line-soft);font-size:11.5px;color:var(--faint)}
+  .meter{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:10px;font-family:'DM Mono'}
+
+  /* About */
+  .about p{font-size:13.5px;color:#cfc8ba;margin:10px 0}
+  .about h3{margin-top:20px}
+  .vs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+  .vs .c{border:1px solid var(--line-soft);border-radius:12px;padding:13px}
+  .vs .c h4{margin:0 0 6px;font-family:'Cinzel';font-size:13px;letter-spacing:.04em}
+  .vs .ppg h4{color:var(--good)}
+  .vs .ecg h4{color:var(--bad)}
+  .vs .c ul{margin:0;padding-left:16px;font-size:12px;color:var(--muted)}
+  .vs .c li{margin:4px 0}
+
+  footer{text-align:center;padding:26px 10px 6px;color:var(--faint);font-size:11px;letter-spacing:.04em;line-height:1.7}
+  footer .d{color:var(--muted)}
+  a{color:var(--gold)}
+  .hidden{display:none!important}
+  video{position:fixed;width:2px;height:2px;opacity:.001;pointer-events:none;top:-10px;left:-10px}
 </style>
 </head>
 <body>
-<header><h2>❤️ Pulse Scanner Demo</h2></header>
-<div class="card">
-<p>Cover the <b>rear camera</b> completely with your fingertip.</p>
-<video id="v" autoplay playsinline></video>
-<button id="start">Start Camera</button>
-<h1 id="bpm">-- BPM</h1>
-<div>Signal: <span id="sig">Waiting…</span></div>
-<div>Quality: <span id="q">Unknown</span></div>
-<canvas id="g" width="400" height="120"></canvas>
-<p class="small">Demo only. This is <b>not</b> a medical device.</p>
-</div>
-<script>
-const v=document.getElementById('v');
-const c=document.getElementById('g');
-const ctx=c.getContext('2d');
-const vals=[];
-async function cam(){
- try{
-  const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});
-  v.srcObject=s;
-  requestAnimationFrame(loop);
- }catch(e){alert(e);}
-}
-document.getElementById("start").onclick=cam;
-const off=document.createElement("canvas");
-off.width=32;off.height=32;
-const ox=off.getContext("2d");
-let lastPeak=0;
-function loop(){
- if(v.readyState>=2){
-   ox.drawImage(v,0,0,32,32);
-   const d=ox.getImageData(0,0,32,32).data;
-   let r=0,g=0,b=0;
-   for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2];}
-   r/=1024;g/=1024;b/=1024;
-   vals.push(r);
-   if(vals.length>200)vals.shift();
-   document.getElementById("sig").textContent=r.toFixed(1);
-   let quality=(r>120&&g<90)?"Good finger detected":"Poor";
-   document.getElementById("q").textContent=quality;
-   ctx.clearRect(0,0,c.width,c.height);
-   ctx.beginPath();
-   vals.forEach((v,i)=>{
-      let y=120-(v/255*120);
-      if(i==0)ctx.moveTo(i*2,y); else ctx.lineTo(i*2,y);
-   });
-   ctx.strokeStyle="lime";ctx.stroke();
+<video id="vid" playsinline muted autoplay></video>
 
-   // Simple demonstration pulse estimate (NOT medically reliable)
-   if(vals.length>20){
-      let a=vals[vals.length-2],b2=vals[vals.length-1];
-      let avg=vals.reduce((x,y)=>x+y,0)/vals.length;
-      if(a<avg && b2>=avg){
-        const now=performance.now();
-        if(lastPeak){
-          const bpm=Math.round(60000/(now-lastPeak));
-          if(bpm>40&&bpm<180)document.getElementById("bpm").textContent=bpm+" BPM";
-        }
-        lastPeak=now;
+<div class="wrap">
+  <header>
+    <div class="brandrow">
+      <canvas class="logo" id="logo" width="68" height="68"></canvas>
+      <h1>Spandana</h1>
+    </div>
+    <div class="deva">स्पन्दन · the pulse</div>
+    <div class="tag">Camera Pulse Monitor</div>
+  </header>
+
+  <div class="notice">
+    <span class="dot"></span>
+    <p>This reads your pulse <b>optically</b> through the camera (photoplethysmography). It is <b>not an ECG</b> and not a medical device. Use it for everyday heart-rate awareness — never for diagnosis.</p>
+  </div>
+
+  <!-- ===== MEASURE ===== -->
+  <section class="panel on" id="p-measure">
+    <div class="card">
+      <div class="stage">
+        <div class="orbwrap">
+          <div class="orb-ring"></div>
+          <div class="orb-ring r2"></div>
+          <div class="orb" id="orb">
+            <div class="bpm placeholder" id="bpm">– –</div>
+            <div class="bpmlabel">bpm</div>
+          </div>
+        </div>
+
+        <div class="wavebox"><canvas class="wave" id="wave" width="960" height="192"></canvas></div>
+
+        <div class="stats">
+          <div class="stat"><div class="v dim" id="s-hrv">–</div><div class="k">HRV ms</div></div>
+          <div class="stat"><div class="v dim" id="s-sig">–</div><div class="k">Signal</div></div>
+          <div class="stat"><div class="v dim" id="s-time">0s</div><div class="k">Elapsed</div></div>
+        </div>
+
+        <div class="qwrap">
+          <div class="qhead"><span>Signal quality</span><span id="q-label">—</span></div>
+          <div class="qbar"><div class="qfill" id="qfill"></div></div>
+        </div>
+
+        <div class="status" id="status">Tap start, then rest your fingertip gently over the rear camera &amp; flash.</div>
+
+        <button class="btn" id="go">Start measuring</button>
+        <div id="torchnote"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== HISTORY ===== -->
+  <section class="panel" id="p-history">
+    <div class="card">
+      <h3>Trend</h3>
+      <div class="sub">Resting heart rate across your saved readings.</div>
+      <div class="trendbox"><canvas class="trend" id="trend" width="960" height="260"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Readings</h3>
+      <div id="hist"></div>
+      <div class="row2">
+        <button class="btn ghost" id="export">Export CSV</button>
+        <button class="btn ghost" id="clear">Clear all</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== INSIGHT (AI, BYOK) ===== -->
+  <section class="panel" id="p-ai">
+    <div class="card">
+      <h3>AI Insight <span style="font-size:11px;color:var(--faint);letter-spacing:.1em">· optional</span></h3>
+      <div class="sub">Everything else in Spandana is free and works without this. Add your own Anthropic key to get a plain-language reading of your trend. Your key stays on this device.</div>
+      <div class="keyfield">
+        <input id="apikey" type="password" placeholder="sk-ant-… (stored locally)" autocomplete="off" />
+        <button class="btn" style="width:auto;margin:0;padding:12px 16px" id="savekey">Save</button>
+      </div>
+      <span class="pill" id="keypill"><span class="g"></span><span id="keypilltext">No key set</span></span>
+      <div class="meter"><span>Model · Haiku 4.5</span><span id="costmeter">Session ≈ $0.0000</span></div>
+      <button class="btn" id="aigo" style="margin-top:16px">Get insight on my trend</button>
+      <div id="aiout"></div>
+    </div>
+  </section>
+
+  <!-- ===== ABOUT ===== -->
+  <section class="panel about" id="p-about">
+    <div class="card">
+      <h3>How it actually works</h3>
+      <p>With the flash on, your fingertip glows red. Each heartbeat pushes a little more blood through your finger, which subtly changes how much light gets back to the camera. Spandana measures that flicker, finds each beat, and turns the spacing between beats into your heart rate.</p>
+
+      <h3>PPG is not ECG</h3>
+      <div class="vs">
+        <div class="c ppg">
+          <h4>PPG · what this does</h4>
+          <ul>
+            <li>Optical — camera + flash</li>
+            <li>Gives heart rate (bpm)</li>
+            <li>Rough HRV on a clean signal</li>
+            <li>Wellness awareness</li>
+          </ul>
+        </div>
+        <div class="c ecg">
+          <h4>ECG · what this can't do</h4>
+          <ul>
+            <li>Electrical — needs electrodes</li>
+            <li>Shows the heart's waveform</li>
+            <li>Can flag rhythm disorders</li>
+            <li>A camera can't sense this</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>The iPhone catch</h3>
+      <p>Steady readings need the flash on. Android Chrome lets a web app control the torch, so Spandana turns it on for you. iPhone Safari does not give web apps torch control — so on iPhone you'll get a warning, and you'll need bright surroundings and a firm, still fingertip, or the reading won't settle.</p>
+
+      <h3>Getting a good reading</h3>
+      <p>Cover the whole lens, press gently but firmly, stay still, and breathe normally. Watch the signal-quality bar — save only when it's green. Cold hands and movement are the usual reasons a reading won't lock.</p>
+
+      <h3>Privacy</h3>
+      <p>The camera feed never leaves your phone — frames are analysed on-device and discarded. Readings are stored only in this browser. The optional AI insight sends just your numbers (not video) to Anthropic using your own key.</p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="d">Spandana · a free pulse-awareness tool, not a medical device</div>
+    Designed &amp; Architected by Krishnamurthy Kandregula · Made by Claude
+  </footer>
+</div>
+
+<nav class="tabs">
+  <button class="tab on" data-p="measure"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Measure</button>
+  <button class="tab" data-p="history"><svg viewBox="0 0 24 24"><path d="M4 19V5m5 14V9m5 10V7m5 12v-8"/></svg>History</button>
+  <button class="tab" data-p="ai"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg>Insight</button>
+  <button class="tab" data-p="about"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></svg>About</button>
+</nav>
+
+<script type="module">
+/* ============================================================
+   Spandana — camera pulse (PPG) monitor
+   Validated DSP core (BPM + HRV) embedded below.
+   ============================================================ */
+
+const $ = id => document.getElementById(id);
+const LS = { hist:'spandana_hist', key:'spandana_key', cost:'spandana_cost' };
+
+/* ---------- Brand logo (canvas pulse glyph) ---------- */
+(function drawLogo(){
+  const c = $('logo'), x = c.getContext('2d'), s = 68;
+  x.clearRect(0,0,s,s);
+  x.strokeStyle = '#d4af6a'; x.lineWidth = 3; x.lineJoin='round'; x.lineCap='round';
+  x.beginPath();
+  const pts = [[6,34],[20,34],[26,18],[34,50],[40,34],[44,28],[48,34],[62,34]];
+  pts.forEach((p,i)=> i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));
+  x.stroke();
+  x.fillStyle='#e8c987';
+  x.beginPath(); x.arc(34,50,2.6,0,7); x.fill();
+})();
+
+/* ---------- PWA: manifest + service worker via blobs ---------- */
+(function pwa(){
+  try{
+    const icon = (()=>{ const c=document.createElement('canvas'); c.width=c.height=192;
+      const x=c.getContext('2d'); x.fillStyle='#0a0a0c'; x.fillRect(0,0,192,192);
+      x.strokeStyle='#d4af6a'; x.lineWidth=9; x.lineJoin='round'; x.lineCap='round'; x.beginPath();
+      const p=[[26,100],[64,100],[80,52],[100,148],[116,100],[126,80],[136,100],[166,100]];
+      p.forEach((q,i)=> i?x.lineTo(q[0],q[1]):x.moveTo(q[0],q[1])); x.stroke();
+      x.fillStyle='#e8c987'; x.beginPath(); x.arc(100,148,7,0,7); x.fill();
+      return c.toDataURL('image/png'); })();
+    const man = { name:'Spandana', short_name:'Spandana', start_url:'.', display:'standalone',
+      background_color:'#0a0a0c', theme_color:'#0a0a0c',
+      icons:[{src:icon,sizes:'192x192',type:'image/png'},{src:icon,sizes:'512x512',type:'image/png'}] };
+    const mb = new Blob([JSON.stringify(man)],{type:'application/json'});
+    const ml = document.createElement('link'); ml.rel='manifest'; ml.href=URL.createObjectURL(mb); document.head.appendChild(ml);
+    const al = document.createElement('link'); al.rel='apple-touch-icon'; al.href=icon; document.head.appendChild(al);
+    if('serviceWorker' in navigator){
+      const sw = `self.addEventListener('install',e=>self.skipWaiting());
+        self.addEventListener('activate',e=>self.clients.claim());
+        self.addEventListener('fetch',e=>{});`;
+      const sb = new Blob([sw],{type:'text/javascript'});
+      navigator.serviceWorker.register(URL.createObjectURL(sb)).catch(()=>{});
+    }
+  }catch(e){}
+})();
+
+/* ---------- Tabs ---------- */
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+    t.classList.add('on');
+    $('p-'+t.dataset.p).classList.add('on');
+    if(t.dataset.p==='history') renderHistory();
+    window.scrollTo({top:0,behavior:'smooth'});
+  });
+});
+
+/* ============================================================
+   DSP CORE  (validated in node against synthetic pulses)
+   ============================================================ */
+function analyzePPG(samples, opts={}){
+  const minIBI = opts.minIBI ?? 0.33, maxIBI = opts.maxIBI ?? 1.50;
+  if(samples.length < 30) return {bpm:null,hrv:null,beats:[],quality:0,ac:[]};
+  const t0=samples[0].t, tN=samples[samples.length-1].t;
+  const dt=(tN-t0)/(samples.length-1), fs=1/dt;
+  const hpA=1-Math.exp(-dt/0.8), lpA=1-Math.exp(-dt/0.06);
+  let base=samples[0].v, sm=0; const ac=new Array(samples.length);
+  for(let i=0;i<samples.length;i++){
+    base+=hpA*(samples[i].v-base);
+    const hp=samples[i].v-base;
+    sm+=lpA*(hp-sm);
+    ac[i]=sm;
+  }
+  let mean=0; for(const x of ac) mean+=x; mean/=ac.length;
+  let vs=0; for(const x of ac) vs+=(x-mean)**2; const std=Math.sqrt(vs/ac.length);
+  const thresh=mean+0.35*std;
+  const halfWin=Math.max(2,Math.round(0.25*fs));
+  const peaks=[]; let lastT=-Infinity;
+  for(let i=0;i<ac.length;i++){
+    if(ac[i]<=thresh) continue;
+    let isMax=true;
+    for(let j=Math.max(0,i-halfWin);j<=Math.min(ac.length-1,i+halfWin);j++){ if(ac[j]>ac[i]){isMax=false;break;} }
+    if(isMax){
+      const t=samples[i].t;
+      if(t-lastT>=minIBI){
+        let off=0;
+        if(i>0 && i<ac.length-1){ const dn=ac[i-1]-2*ac[i]+ac[i+1]; if(dn!==0) off=0.5*(ac[i-1]-ac[i+1])/dn; }
+        peaks.push(t+off*dt); lastT=t;
       }
-   }
- }
- requestAnimationFrame(loop);
+    }
+  }
+  const ibis=[];
+  for(let i=1;i<peaks.length;i++){ const v=peaks[i]-peaks[i-1]; if(v>=minIBI&&v<=maxIBI) ibis.push(v); }
+  if(ibis.length<3) return {bpm:null,hrv:null,beats:peaks,quality:0,ac};
+  const sorted=[...ibis].sort((a,b)=>a-b);
+  const med=sorted[Math.floor(sorted.length/2)];
+  const bpm=60/med;
+  let sd=0; for(let i=1;i<ibis.length;i++){ const d=(ibis[i]-ibis[i-1])*1000; sd+=d*d; }
+  const hrv=Math.sqrt(sd/(ibis.length-1));
+  const expBeats=(tN-t0)/med;
+  const coverage=Math.min(1,ibis.length/Math.max(1,expBeats-1));
+  let im=0; for(const x of ibis) im+=x; im/=ibis.length;
+  let iv=0; for(const x of ibis) iv+=(x-im)**2; iv/=ibis.length;
+  const cv=Math.sqrt(iv)/im;
+  const reg=Math.max(0,1-cv*2);
+  const quality=Math.max(0,Math.min(1,0.5*coverage+0.5*reg));
+  return {bpm,hrv,beats:peaks,quality,ac};
 }
-if('serviceWorker' in navigator){
- const code='self.addEventListener("fetch",e=>{})';
- const blob=new Blob([code],{type:'text/javascript'});
- navigator.serviceWorker.register(URL.createObjectURL(blob));
+
+/* ============================================================
+   Camera capture + live loop
+   ============================================================ */
+const vid=$('vid');
+let stream=null, track=null, torchOn=false, running=false;
+let samples=[], startT=0, rafId=null, lastBeatCount=0;
+const SESSION=30; // seconds
+const proc=document.createElement('canvas'); proc.width=80; proc.height=60;
+const pctx=proc.getContext('2d',{willReadFrequently:true});
+
+async function startMeasure(){
+  if(running){ stopMeasure(false); return; }
+  $('aiout');
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:320},height:{ideal:240}},audio:false});
+  }catch(e){
+    setStatus('Camera blocked. Allow camera access, then tap start again.',true);
+    return;
+  }
+  vid.srcObject=stream;
+  await vid.play().catch(()=>{});
+  track=stream.getVideoTracks()[0];
+
+  // Torch handling (the honest iOS bit)
+  torchOn=false;
+  try{
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if(caps && caps.torch){
+      await track.applyConstraints({advanced:[{torch:true}]});
+      torchOn=true;
+      $('torchnote').innerHTML='';
+    }else{
+      $('torchnote').innerHTML='<div class="status warnstate" style="margin-top:10px">Flash isn\u2019t controllable in this browser (normal on iPhone/Safari). Find bright light and press firmly, or readings may not settle.</div>';
+    }
+  }catch(e){
+    $('torchnote').innerHTML='<div class="status warnstate" style="margin-top:10px">Couldn\u2019t switch the flash on automatically — add your own light for a clean reading.</div>';
+  }
+
+  samples=[]; startT=performance.now()/1000; lastBeatCount=0; running=true;
+  $('go').textContent='Stop'; $('go').classList.add('stop');
+  $('bpm').classList.remove('placeholder');
+  setStatus('Cover the lens fully and hold still…');
+  loop();
 }
+
+function stopMeasure(save){
+  running=false;
+  if(rafId) cancelAnimationFrame(rafId);
+  try{ if(track&&torchOn) track.applyConstraints({advanced:[{torch:false}]}); }catch(e){}
+  try{ if(stream) stream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  stream=null; track=null; torchOn=false;
+  $('go').textContent='Start measuring'; $('go').classList.remove('stop');
+}
+
+function meanChannels(){
+  pctx.drawImage(vid,0,0,proc.width,proc.height);
+  const d=pctx.getImageData(0,0,proc.width,proc.height).data;
+  let r=0,g=0,b=0; const n=d.length/4;
+  for(let i=0;i<d.length;i+=4){ r+=d[i]; g+=d[i+1]; b+=d[i+2]; }
+  return {r:r/n,g:g/n,b:b/n};
+}
+const fingerOn = m => m.r>90 && m.r>m.g*1.25 && m.r>m.b*1.25;
+
+function loop(){
+  if(!running) return;
+  rafId=requestAnimationFrame(loop);
+  if(vid.readyState<2) return;
+  const now=performance.now()/1000;
+  const m=meanChannels();
+  const elapsed=now-startT;
+
+  if(!fingerOn(m)){
+    if(samples.length<8) setStatus('Place your fingertip over the camera so the view turns deep red.');
+    // soft reset if finger lifted early
+    if(samples.length>0 && elapsed<2) samples=[];
+  }else{
+    samples.push({t:now,v:m.r});
+  }
+  if(samples.length>900) samples=samples.slice(-900); // ~30s cap
+
+  $('s-time').textContent=Math.min(SESSION,Math.floor(elapsed))+'s';
+
+  const res=analyzePPG(samples);
+  drawWave(res.ac);
+  if(res.bpm){
+    $('bpm').textContent=Math.round(res.bpm);
+    setSignal(res.quality);
+    if(res.quality>0.68 && res.hrv!=null){ $('s-hrv').textContent=Math.round(res.hrv); $('s-hrv').classList.remove('dim'); }
+    else { $('s-hrv').textContent='~'; $('s-hrv').classList.add('dim'); }
+    // beat animation when a new peak appears
+    if(res.beats.length>lastBeatCount){ pulseOrb(); lastBeatCount=res.beats.length; }
+    if(fingerOn(m)){
+      if(res.quality>0.68) setStatus('Locked on — hold steady.');
+      else setStatus('Reading… keep still and press a little firmer.');
+    }
+  }else if(samples.length>10){
+    setSignal(res.quality);
+    setStatus('Finding your pulse…');
+  }
+
+  if(elapsed>=SESSION){
+    finishSession(res);
+  }
+}
+
+function finishSession(res){
+  stopMeasure(true);
+  if(res.bpm && res.quality>0.5){
+    const reading={ bpm:Math.round(res.bpm), hrv:(res.quality>0.68&&res.hrv!=null)?Math.round(res.hrv):null,
+      quality:Math.round(res.quality*100), t:Date.now() };
+    saveReading(reading);
+    setStatus(`Saved · <b>${reading.bpm} bpm</b>${reading.hrv?` · HRV ~${reading.hrv} ms`:''}. See History for your trend.`);
+  }else{
+    setStatus('That reading was too noisy to save. Try again with a firmer, stiller finger in good light.',true);
+    $('bpm').textContent='– –'; $('bpm').classList.add('placeholder');
+  }
+}
+
+function pulseOrb(){
+  const o=$('orb'); o.classList.add('beat');
+  setTimeout(()=>o.classList.remove('beat'),95);
+  if(navigator.vibrate) try{navigator.vibrate(8);}catch(e){}
+}
+function setStatus(html,warn){ const s=$('status'); s.innerHTML=html; s.classList.toggle('warnstate',!!warn); }
+function setSignal(q){
+  $('qfill').style.width=Math.round(q*100)+'%';
+  const lbl = q>0.68?'Strong':q>0.4?'Building':'Weak';
+  $('q-label').textContent=lbl;
+  $('s-sig').textContent=Math.round(q*100)+'%'; $('s-sig').classList.toggle('dim',q<0.4);
+}
+
+/* ---------- Waveform render ---------- */
+const wave=$('wave'), wctx=wave.getContext('2d');
+function drawWave(ac){
+  const W=wave.width,H=wave.height; wctx.clearRect(0,0,W,H);
+  // ECG-style grid (honest: it's a PPG trace, grid is decorative reference)
+  wctx.strokeStyle='rgba(212,175,106,0.06)'; wctx.lineWidth=1;
+  for(let gx=0;gx<W;gx+=48){ wctx.beginPath();wctx.moveTo(gx,0);wctx.lineTo(gx,H);wctx.stroke(); }
+  for(let gy=0;gy<H;gy+=48){ wctx.beginPath();wctx.moveTo(0,gy);wctx.lineTo(W,gy);wctx.stroke(); }
+  if(!ac||ac.length<4) return;
+  const seg=ac.slice(-360);
+  let mn=Infinity,mx=-Infinity; for(const v of seg){ if(v<mn)mn=v; if(v>mx)mx=v; }
+  const rng=(mx-mn)||1;
+  wctx.beginPath();
+  wctx.strokeStyle='#e8c987'; wctx.lineWidth=2.4; wctx.lineJoin='round'; wctx.lineCap='round';
+  wctx.shadowColor='rgba(232,201,135,0.5)'; wctx.shadowBlur=8;
+  seg.forEach((v,i)=>{
+    const x=(i/(seg.length-1))*W;
+    const y=H-12-((v-mn)/rng)*(H-24);
+    i?wctx.lineTo(x,y):wctx.moveTo(x,y);
+  });
+  wctx.stroke(); wctx.shadowBlur=0;
+}
+
+/* ============================================================
+   History + trend + CSV
+   ============================================================ */
+function getHist(){ try{return JSON.parse(localStorage.getItem(LS.hist)||'[]');}catch(e){return [];} }
+function saveReading(r){ const h=getHist(); h.push(r); localStorage.setItem(LS.hist,JSON.stringify(h)); }
+function fmtTime(ts){ const d=new Date(ts);
+  return d.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' · '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }
+
+function renderHistory(){
+  const h=getHist().slice().reverse();
+  const box=$('hist');
+  if(!h.length){ box.innerHTML='<div class="empty">No readings yet.<br>Measure your pulse and it\u2019ll show up here.</div>'; }
+  else{
+    box.innerHTML=h.map(r=>`<div class="hrow">
+      <div><span class="hb">${r.bpm}</span> <span class="hu">BPM</span></div>
+      <div class="hmeta">${fmtTime(r.t)}<br><span class="hv">${r.hrv?('HRV ~'+r.hrv+'ms'):'HRV —'} · ${r.quality}%</span></div>
+    </div>`).join('');
+  }
+  drawTrend(getHist());
+}
+
+const trend=$('trend'), tctx=trend.getContext('2d');
+function drawTrend(h){
+  const W=trend.width,H=trend.height; tctx.clearRect(0,0,W,H);
+  tctx.strokeStyle='rgba(212,175,106,0.06)';tctx.lineWidth=1;
+  for(let gy=0;gy<H;gy+=H/4){tctx.beginPath();tctx.moveTo(0,gy);tctx.lineTo(W,gy);tctx.stroke();}
+  if(h.length<2){ tctx.fillStyle='#5a564f'; tctx.font='15px DM Mono, monospace'; tctx.textAlign='center';
+    tctx.fillText(h.length?'One reading so far':'No readings yet',W/2,H/2); return; }
+  const bpms=h.map(r=>r.bpm);
+  let mn=Math.min(...bpms)-6, mx=Math.max(...bpms)+6; const rng=(mx-mn)||1;
+  const pad=24;
+  const xy=h.map((r,i)=>[pad+(i/(h.length-1))*(W-pad*2), H-pad-((r.bpm-mn)/rng)*(H-pad*2)]);
+  // fill
+  tctx.beginPath(); tctx.moveTo(xy[0][0],H-pad); xy.forEach(p=>tctx.lineTo(p[0],p[1])); tctx.lineTo(xy[xy.length-1][0],H-pad); tctx.closePath();
+  const grd=tctx.createLinearGradient(0,0,0,H); grd.addColorStop(0,'rgba(212,175,106,0.22)'); grd.addColorStop(1,'rgba(212,175,106,0)');
+  tctx.fillStyle=grd; tctx.fill();
+  // line
+  tctx.beginPath(); xy.forEach((p,i)=> i?tctx.lineTo(p[0],p[1]):tctx.moveTo(p[0],p[1]));
+  tctx.strokeStyle='#e8c987'; tctx.lineWidth=2.5; tctx.lineJoin='round'; tctx.stroke();
+  // dots
+  tctx.fillStyle='#e8c987'; xy.forEach(p=>{tctx.beginPath();tctx.arc(p[0],p[1],3,0,7);tctx.fill();});
+}
+
+$('export').addEventListener('click',()=>{
+  const h=getHist(); if(!h.length){ alert('No readings to export yet.'); return; }
+  const rows=[['timestamp_iso','bpm','hrv_ms','signal_quality_pct']]
+    .concat(h.map(r=>[new Date(r.t).toISOString(), r.bpm, r.hrv??'', r.quality]));
+  const csv=rows.map(r=>r.join(',')).join('\n');
+  const b=new Blob([csv],{type:'text/csv'}); const u=URL.createObjectURL(b);
+  const a=document.createElement('a'); a.href=u; a.download='spandana_readings.csv'; a.click(); URL.revokeObjectURL(u);
+});
+$('clear').addEventListener('click',()=>{
+  if(confirm('Delete all saved readings? This can\u2019t be undone.')){ localStorage.removeItem(LS.hist); renderHistory(); }
+});
+
+/* ============================================================
+   AI Insight (BYOK, Haiku 4.5, cost-capped)
+   ============================================================ */
+function refreshKeyPill(){
+  const k=localStorage.getItem(LS.key);
+  const pill=$('keypill'), txt=$('keypilltext');
+  if(k){ pill.classList.add('live'); txt.textContent='Key saved on this device'; $('apikey').value=''; $('apikey').placeholder='•••• saved ••••'; }
+  else { pill.classList.remove('live'); txt.textContent='No key set'; }
+  const c=parseFloat(localStorage.getItem(LS.cost)||'0');
+  $('costmeter').textContent='Session ≈ $'+c.toFixed(4);
+}
+$('savekey').addEventListener('click',()=>{
+  const v=$('apikey').value.trim();
+  if(v){ localStorage.setItem(LS.key,v); }
+  refreshKeyPill();
+});
+
+$('aigo').addEventListener('click',async()=>{
+  const key=localStorage.getItem(LS.key);
+  const out=$('aiout');
+  if(!key){ out.innerHTML='<div class="aiout">Add your Anthropic API key above first — then I can read your trend.</div>'; return; }
+  const h=getHist();
+  if(h.length<2){ out.innerHTML='<div class="aiout">Take at least two readings and I\u2019ll describe your trend.</div>'; return; }
+
+  let cost=parseFloat(localStorage.getItem(LS.cost)||'0');
+  if(cost>0.50){ out.innerHTML='<div class="aiout">Session spend cap reached (~$0.50). Reload to reset.</div>'; return; }
+
+  out.innerHTML='<div class="aiout"><span class="pill live"><span class="g"></span>Reading your trend…</span></div>';
+  const recent=h.slice(-12).map(r=>({when:new Date(r.t).toISOString(),bpm:r.bpm,hrv_ms:r.hrv,quality:r.quality}));
+  const sys='You are a calm, plain-language wellness explainer inside a heart-rate app. You are NOT a doctor and must not diagnose. Given a list of optically-measured (PPG) pulse readings, describe in 3-4 short sentences what the trend looks like (range, stability, any drift), note that PPG bpm is fairly reliable but HRV here is only a rough estimate, and gently suggest seeing a clinician for anything that worries them. No bullet points. No alarming language. Never name conditions.';
+  const user='Here are my recent Spandana readings (most recent last):\n'+JSON.stringify(recent,null,0)+'\nGive me a short, friendly read on the trend.';
+
+  try{
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:400,system:sys,messages:[{role:'user',content:user}]})
+    });
+    if(!resp.ok){ const t=await resp.text(); out.innerHTML='<div class="aiout">Couldn\u2019t reach the model ('+resp.status+'). Check your key and try again.<span class="disc">'+t.slice(0,160).replace(/</g,'&lt;')+'</span></div>'; return; }
+    const data=await resp.json();
+    const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+    if(data.usage){
+      const inK=data.usage.input_tokens/1e6*1.0, outK=data.usage.output_tokens/1e6*5.0; // Haiku 4.5 approx $/M
+      cost+=inK+outK; localStorage.setItem(LS.cost,cost.toFixed(6));
+    }
+    out.innerHTML='<div class="aiout">'+(text||'No response.').replace(/</g,'&lt;')+'<span class="disc">Spandana is not a medical device. This is a friendly summary of your own numbers, not a diagnosis. For anything that concerns you, talk to a clinician.</span></div>';
+    refreshKeyPill();
+  }catch(e){
+    out.innerHTML='<div class="aiout">Network error reaching the model. You can still use every other part of Spandana offline.</div>';
+  }
+});
+
+/* ---------- buttons + init ---------- */
+$('go').addEventListener('click',startMeasure);
+window.addEventListener('beforeunload',()=>{ if(running) stopMeasure(false); });
+refreshKeyPill();
+drawWave([]);
 </script>
 </body>
 </html>
