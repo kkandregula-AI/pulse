@@ -199,9 +199,12 @@
         <div class="wavebox"><canvas class="wave" id="wave" width="960" height="192"></canvas></div>
 
         <div class="stats">
+          <div class="stat"><div class="v dim" id="s-resp">–</div><div class="k">Resp br/min</div></div>
           <div class="stat"><div class="v dim" id="s-hrv">–</div><div class="k">HRV ms</div></div>
+          <div class="stat"><div class="v dim" id="s-pi">–</div><div class="k">Perfusion %</div></div>
           <div class="stat"><div class="v dim" id="s-sig">–</div><div class="k">Signal</div></div>
           <div class="stat"><div class="v dim" id="s-time">0s</div><div class="k">Elapsed</div></div>
+          <div class="stat"><div class="v dim" id="s-ch">–</div><div class="k">Channel</div></div>
         </div>
 
         <div class="qwrap">
@@ -255,6 +258,12 @@
     <div class="card">
       <h3>How it actually works</h3>
       <p>With the flash on, your fingertip glows red. Each heartbeat pushes a little more blood through your finger, which subtly changes how much light gets back to the camera. Spandana measures that flicker, finds each beat, and turns the spacing between beats into your heart rate.</p>
+
+      <h3>What the numbers mean</h3>
+      <p><b>BPM</b> is your heart rate and the most reliable figure here. <b>Resp</b> is your breathing rate, read from the way each breath subtly speeds, slows and resizes your pulse — it needs about 20 still seconds to appear. <b>Perfusion</b> is how strong the pulse signal is relative to background light: higher means a cleaner reading, and it doubles as a blood-flow strength cue. <b>HRV</b> stays a rough estimate, since 30-frames-a-second can't time beats precisely. <b>Channel</b> just shows whether red or green light gave the clearest pulse — the app picks automatically.</p>
+
+      <h3>What this deliberately does not measure</h3>
+      <p>No blood oxygen, blood pressure, or glucose. A normal phone camera physically can't measure those reliably, and apps that claim to are not trustworthy. Spandana only reports what the optics genuinely support.</p>
 
       <h3>PPG is not ECG</h3>
       <div class="vs">
@@ -420,7 +429,12 @@ function analyzePPG(samples, opts={}){
 const vid=$('vid');
 let stream=null, track=null, torchOn=false, running=false;
 let samples=[], startT=0, rafId=null, lastBeatCount=0;
-const SESSION=30; // seconds
+let stableSince=0, lastStableBpm=null;
+let lastResp=null, frameN=0, lastPI=0, lastCh='R';
+const SESSION=30;     // hard cap (seconds)
+const MIN_SESSION=8;  // earliest we'll auto-save
+const LOCK_HOLD=5;    // seconds of stable lock to finish early
+const WIN=360;        // trailing analysis window (~12s @30fps) — keeps quality responsive
 const proc=document.createElement('canvas'); proc.width=80; proc.height=60;
 const pctx=proc.getContext('2d',{willReadFrequently:true});
 
@@ -437,22 +451,30 @@ async function startMeasure(){
   await vid.play().catch(()=>{});
   track=stream.getVideoTracks()[0];
 
-  // Torch handling (the honest iOS bit)
+  // Torch handling (the honest iOS bit) + best-effort exposure stabilisation
   torchOn=false;
   try{
     const caps = track.getCapabilities ? track.getCapabilities() : {};
+    // Where supported (mostly Android), nudge the camera to stop hunting exposure,
+    // which otherwise erases the very brightness changes we measure. iOS ignores these.
+    const adv=[];
+    if(caps.exposureMode && caps.exposureMode.includes && caps.exposureMode.includes('continuous')) adv.push({exposureMode:'continuous'});
+    if(caps.focusMode && caps.focusMode.includes && caps.focusMode.includes('continuous')) adv.push({focusMode:'continuous'});
+    if(caps.whiteBalanceMode && caps.whiteBalanceMode.includes && caps.whiteBalanceMode.includes('continuous')) adv.push({whiteBalanceMode:'continuous'});
+    if(adv.length){ try{ await track.applyConstraints({advanced:adv}); }catch(e){} }
+
     if(caps && caps.torch){
       await track.applyConstraints({advanced:[{torch:true}]});
       torchOn=true;
       $('torchnote').innerHTML='';
     }else{
-      $('torchnote').innerHTML='<div class="status warnstate" style="margin-top:10px">Flash isn\u2019t controllable in this browser (normal on iPhone/Safari). Find bright light and press firmly, or readings may not settle.</div>';
+      $('torchnote').innerHTML='<div class="status warnstate" style="margin-top:10px">No flash control in this browser (normal on iPhone/Safari). Sit near a bright lamp or window and press your fingertip firmly — that replaces the missing torch.</div>';
     }
   }catch(e){
-    $('torchnote').innerHTML='<div class="status warnstate" style="margin-top:10px">Couldn\u2019t switch the flash on automatically — add your own light for a clean reading.</div>';
+    $('torchnote').innerHTML='<div class="status warnstate" style="margin-top:10px">Couldn\u2019t switch the flash on automatically — add your own bright light for a clean reading.</div>';
   }
 
-  samples=[]; startT=performance.now()/1000; lastBeatCount=0; running=true;
+  samples=[]; startT=performance.now()/1000; lastBeatCount=0; stableSince=0; lastStableBpm=null; lastResp=null; frameN=0; lastPI=0; running=true;
   $('go').textContent='Stop'; $('go').classList.add('stop');
   $('bpm').classList.remove('placeholder');
   setStatus('Cover the lens fully and hold still…');
@@ -475,7 +497,72 @@ function meanChannels(){
   for(let i=0;i<d.length;i+=4){ r+=d[i]; g+=d[i+1]; b+=d[i+2]; }
   return {r:r/n,g:g/n,b:b/n};
 }
-const fingerOn = m => m.r>90 && m.r>m.g*1.25 && m.r>m.b*1.25;
+// Finger present when red is the dominant channel and the frame isn't bright room light.
+// Relaxed vs before: works in ambient light (no flash) where the finger looks dim-red, not deep-red.
+const fingerOn = m => m.r>=m.g && m.r>=m.b && m.r>40 && m.r<252;
+
+// Build the analysis window from whichever channel carries the strongest pulse.
+// Without the flash, green sometimes beats red — pick by perfusion index (AC/DC).
+function pickWindow(buf){
+  const win = buf.slice(-WIN);
+  if(win.length<24){ const dc=win.length?win.reduce((a,s)=>a+s.r,0)/win.length:0; return {samples:win.map(s=>({t:s.t,v:s.r})), ch:'R', dc}; }
+  const idx = key=>{
+    let m=0; for(const s of win) m+=s[key]; m/=win.length;
+    let base=win[0][key], e=0;
+    for(const s of win){ base+=0.05*(s[key]-base); const ac=s[key]-base; e+=ac*ac; }
+    return {pi:Math.sqrt(e/win.length)/(m||1), dc:m};
+  };
+  const ir=idx('r'), ig=idx('g');
+  const useG = ig.pi > ir.pi*1.15;
+  const ch = useG ? 'g' : 'r';
+  return { samples:win.map(s=>({t:s.t,v:s[ch]})), ch:useG?'G':'R', dc:(useG?ig.dc:ir.dc) };
+}
+
+/* Respiration from PPG — fuses intensity-baseline (RIIV) and beat-timing (RSA).
+   Band 0.1–0.5 Hz (6–30 br/min). Needs ~18s+ of data. Validated in node. */
+function estimateRespiration(samples, beats){
+  if(samples.length<120 || beats.length<6) return null;
+  const t0=samples[0].t, tN=samples[samples.length-1].t, dur=tN-t0;
+  if(dur<18) return null;
+  const fsr=5, N=Math.floor(dur*fsr);
+  if(N<80) return null;
+  const grid=i=>t0+i/fsr;
+  function resample(times, vals){
+    const out=new Array(N); let j=0;
+    for(let i=0;i<N;i++){ const t=grid(i);
+      while(j<times.length-2 && times[j+1]<t) j++;
+      const t1=times[j], t2=times[Math.min(times.length-1,j+1)];
+      const v1=vals[j], v2=vals[Math.min(vals.length-1,j+1)];
+      out[i]=(t2===t1)?v1:v1+(v2-v1)*((t-t1)/(t2-t1));
+    } return out;
+  }
+  function prep(x){
+    let m=0; for(const v of x) m+=v; m/=x.length;
+    const y=x.map(v=>v-m);
+    const dt=1/fsr, lpA=1-Math.exp(-dt/0.22), hpA=1-Math.exp(-dt/2.0);
+    let lp=0, base=0; const o=new Array(y.length);
+    for(let i=0;i<y.length;i++){ lp+=lpA*(y[i]-lp); base+=hpA*(lp-base); o[i]=lp-base; } return o;
+  }
+  const riiv=prep(resample(samples.map(s=>s.t), samples.map(s=>s.v)));
+  const ibiT=[], ibiHR=[];
+  for(let i=1;i<beats.length;i++){ ibiT.push((beats[i]+beats[i-1])/2); ibiHR.push(60/(beats[i]-beats[i-1])); }
+  let rsa=null; if(ibiT.length>=6) rsa=prep(resample(ibiT, ibiHR));
+  function bandPeak(x){
+    let best=0,bestF=0,sum=0,cnt=0;
+    for(let f=0.10; f<=0.50; f+=0.005){ let re=0,im=0;
+      for(let n=0;n<x.length;n++){ const a=2*Math.PI*f*n/fsr; re+=x[n]*Math.cos(a); im+=x[n]*Math.sin(a); }
+      const p=re*re+im*im; sum+=p; cnt++; if(p>best){best=p;bestF=f;} }
+    return {f:bestF, prom: sum>0? best/(sum/cnt):0};
+  }
+  const cands=[]; const p1=bandPeak(riiv); cands.push({f:p1.f,prom:p1.prom,w:1.0});
+  if(rsa){ const p2=bandPeak(rsa); cands.push({f:p2.f,prom:p2.prom,w:1.1}); }
+  let f,prom;
+  if(cands.length===2 && Math.abs(cands[0].f-cands[1].f)<0.04){
+    const wsum=cands[0].prom+cands[1].prom||1;
+    f=(cands[0].f*cands[0].prom+cands[1].f*cands[1].prom)/wsum; prom=Math.max(cands[0].prom,cands[1].prom);
+  }else{ const top=cands.sort((a,b)=>b.prom*b.w-a.prom*a.w)[0]; f=top.f; prom=top.prom; }
+  return { brpm:f*60, confidence:Math.max(0,Math.min(1,(prom-2)/8)) };
+}
 
 function loop(){
   if(!running) return;
@@ -486,35 +573,69 @@ function loop(){
   const elapsed=now-startT;
 
   if(!fingerOn(m)){
-    if(samples.length<8) setStatus('Place your fingertip over the camera so the view turns deep red.');
-    // soft reset if finger lifted early
-    if(samples.length>0 && elapsed<2) samples=[];
+    if(samples.length<8) setStatus('Rest your fingertip over the rear camera, covering the whole lens.');
+    if(samples.length>0 && elapsed<2) samples=[]; // soft reset if finger lifted at the very start
   }else{
-    samples.push({t:now,v:m.r});
+    samples.push({t:now,r:m.r,g:m.g});
   }
-  if(samples.length>900) samples=samples.slice(-900); // ~30s cap
+  if(samples.length>900) samples=samples.slice(-900);
 
   $('s-time').textContent=Math.min(SESSION,Math.floor(elapsed))+'s';
+  frameN++;
 
-  const res=analyzePPG(samples);
+  const w=pickWindow(samples);
+  const res=analyzePPG(w.samples);
   drawWave(res.ac);
+
+  // Perfusion index: AC peak-to-peak over DC level of the active channel
+  if(res.ac && res.ac.length>4 && w.dc>0){
+    let mn=Infinity,mx=-Infinity; for(const v of res.ac){ if(v<mn)mn=v; if(v>mx)mx=v; }
+    lastPI=Math.max(0,Math.min(40,((mx-mn)/w.dc)*100));
+    lastCh=w.ch;
+    $('s-ch').textContent=w.ch; $('s-ch').classList.remove('dim');
+    if(res.quality>0.4){ $('s-pi').textContent=lastPI.toFixed(1); $('s-pi').classList.remove('dim'); }
+    else { $('s-pi').textContent='~'; $('s-pi').classList.add('dim'); }
+  }
+
+  // Respiration: needs a longer window, so analyse the full buffer (~up to 30s), throttled to ~1/s
+  if(frameN%30===0 && samples.length>=120){
+    const full=samples.map(s=>({t:s.t,v:(w.ch==='G'?s.g:s.r)}));
+    const fr=analyzePPG(full);
+    const rr=estimateRespiration(full, fr.beats);
+    if(rr) lastResp=rr;
+  }
+  if(lastResp && lastResp.confidence>=0.35){
+    $('s-resp').textContent=Math.round(lastResp.brpm); $('s-resp').classList.remove('dim');
+  }else{ $('s-resp').textContent=(samples.length>=120?'~':'–'); $('s-resp').classList.add('dim'); }
+
   if(res.bpm){
     $('bpm').textContent=Math.round(res.bpm);
     setSignal(res.quality);
     if(res.quality>0.68 && res.hrv!=null){ $('s-hrv').textContent=Math.round(res.hrv); $('s-hrv').classList.remove('dim'); }
     else { $('s-hrv').textContent='~'; $('s-hrv').classList.add('dim'); }
-    // beat animation when a new peak appears
     if(res.beats.length>lastBeatCount){ pulseOrb(); lastBeatCount=res.beats.length; }
+
+    // track a stable lock for early finish
+    const bpm=Math.round(res.bpm);
+    if(res.quality>0.8 && lastStableBpm!=null && Math.abs(bpm-lastStableBpm)<=3){
+      if(!stableSince) stableSince=now;
+    }else{ stableSince=0; }
+    lastStableBpm=bpm;
+
     if(fingerOn(m)){
-      if(res.quality>0.68) setStatus('Locked on — hold steady.');
-      else setStatus('Reading… keep still and press a little firmer.');
+      if(elapsed<3) setStatus('Letting the camera settle…');
+      else if(res.quality>0.8) setStatus('Locked on — hold steady<span class="countdown"> '+Math.max(0,Math.ceil(LOCK_HOLD-(stableSince?now-stableSince:0)))+'s</span>');
+      else if(res.quality>0.5) setStatus('Reading… keep still and press a little firmer.');
+      else setStatus('Weak signal — more light and a firmer, stiller finger will help.');
     }
   }else if(samples.length>10){
     setSignal(res.quality);
-    setStatus('Finding your pulse…');
+    setStatus(elapsed<3 ? 'Letting the camera settle…' : 'Finding your pulse…');
   }
 
-  if(elapsed>=SESSION){
+  // Finish early once we've held a clean lock, or at the hard cap.
+  const lockedLongEnough = stableSince && (now-stableSince)>=LOCK_HOLD && elapsed>=MIN_SESSION;
+  if(lockedLongEnough || elapsed>=SESSION){
     finishSession(res);
   }
 }
@@ -522,10 +643,13 @@ function loop(){
 function finishSession(res){
   stopMeasure(true);
   if(res.bpm && res.quality>0.5){
-    const reading={ bpm:Math.round(res.bpm), hrv:(res.quality>0.68&&res.hrv!=null)?Math.round(res.hrv):null,
+    const reading={ bpm:Math.round(res.bpm),
+      hrv:(res.quality>0.68&&res.hrv!=null)?Math.round(res.hrv):null,
+      resp:(lastResp&&lastResp.confidence>=0.35)?Math.round(lastResp.brpm):null,
+      pi:lastPI>0?Math.round(lastPI*10)/10:null,
       quality:Math.round(res.quality*100), t:Date.now() };
     saveReading(reading);
-    setStatus(`Saved · <b>${reading.bpm} bpm</b>${reading.hrv?` · HRV ~${reading.hrv} ms`:''}. See History for your trend.`);
+    setStatus(`Saved · <b>${reading.bpm} bpm</b>${reading.resp?` · ${reading.resp} br/min`:''}${reading.hrv?` · HRV ~${reading.hrv} ms`:''}. See History for your trend.`);
   }else{
     setStatus('That reading was too noisy to save. Try again with a firmer, stiller finger in good light.',true);
     $('bpm').textContent='– –'; $('bpm').classList.add('placeholder');
@@ -583,7 +707,7 @@ function renderHistory(){
   else{
     box.innerHTML=h.map(r=>`<div class="hrow">
       <div><span class="hb">${r.bpm}</span> <span class="hu">BPM</span></div>
-      <div class="hmeta">${fmtTime(r.t)}<br><span class="hv">${r.hrv?('HRV ~'+r.hrv+'ms'):'HRV —'} · ${r.quality}%</span></div>
+      <div class="hmeta">${fmtTime(r.t)}<br><span class="hv">${r.resp?(r.resp+' br/min · '):''}${r.hrv?('HRV ~'+r.hrv+'ms · '):''}${r.pi?('PI '+r.pi+'% · '):''}${r.quality}%</span></div>
     </div>`).join('');
   }
   drawTrend(getHist());
@@ -613,8 +737,8 @@ function drawTrend(h){
 
 $('export').addEventListener('click',()=>{
   const h=getHist(); if(!h.length){ alert('No readings to export yet.'); return; }
-  const rows=[['timestamp_iso','bpm','hrv_ms','signal_quality_pct']]
-    .concat(h.map(r=>[new Date(r.t).toISOString(), r.bpm, r.hrv??'', r.quality]));
+  const rows=[['timestamp_iso','bpm','resp_br_min','hrv_ms','perfusion_index_pct','signal_quality_pct']]
+    .concat(h.map(r=>[new Date(r.t).toISOString(), r.bpm, r.resp??'', r.hrv??'', r.pi??'', r.quality]));
   const csv=rows.map(r=>r.join(',')).join('\n');
   const b=new Blob([csv],{type:'text/csv'}); const u=URL.createObjectURL(b);
   const a=document.createElement('a'); a.href=u; a.download='spandana_readings.csv'; a.click(); URL.revokeObjectURL(u);
@@ -651,8 +775,8 @@ $('aigo').addEventListener('click',async()=>{
   if(cost>0.50){ out.innerHTML='<div class="aiout">Session spend cap reached (~$0.50). Reload to reset.</div>'; return; }
 
   out.innerHTML='<div class="aiout"><span class="pill live"><span class="g"></span>Reading your trend…</span></div>';
-  const recent=h.slice(-12).map(r=>({when:new Date(r.t).toISOString(),bpm:r.bpm,hrv_ms:r.hrv,quality:r.quality}));
-  const sys='You are a calm, plain-language wellness explainer inside a heart-rate app. You are NOT a doctor and must not diagnose. Given a list of optically-measured (PPG) pulse readings, describe in 3-4 short sentences what the trend looks like (range, stability, any drift), note that PPG bpm is fairly reliable but HRV here is only a rough estimate, and gently suggest seeing a clinician for anything that worries them. No bullet points. No alarming language. Never name conditions.';
+  const recent=h.slice(-12).map(r=>({when:new Date(r.t).toISOString(),bpm:r.bpm,resp_br_min:r.resp,hrv_ms:r.hrv,perfusion_pct:r.pi,quality:r.quality}));
+  const sys='You are a calm, plain-language wellness explainer inside a heart-rate app. You are NOT a doctor and must not diagnose. Readings are optical (PPG) from a phone camera and include: bpm (fairly reliable), resp_br_min (breathing rate, an estimate), hrv_ms (a rough estimate only), and perfusion_pct (signal strength / blood-flow indicator, not a diagnostic number). In 3-4 short sentences describe what the trend looks like (ranges, stability, any drift across bpm and breathing), remind the reader these are wellness estimates not medical readings, and gently suggest seeing a clinician for anything that worries them. No bullet points. No alarming language. Never name conditions.';
   const user='Here are my recent Spandana readings (most recent last):\n'+JSON.stringify(recent,null,0)+'\nGive me a short, friendly read on the trend.';
 
   try{
